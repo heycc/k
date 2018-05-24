@@ -1,0 +1,7 @@
+MaxIdleConnsPerHost	= 2
+MaxPullerWorker		= 10
+PullRequestTimeout	= 2
+LogLevel		= "DEBUG"
+BufferedChanSize	= 500
+ExporterPort		= 8606
+MysqlDsn			= "root:@(127.0.0.1:3306)/feiyu"
