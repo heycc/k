@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	_ "net/http/pprof"
 	_ "github.com/go-sql-driver/mysql"
 	"k/collector_puller"
 	"github.com/koding/multiconfig"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"log"
 )
 
 var (
@@ -37,7 +39,7 @@ type exporterEndPoint struct {
 	Uri  string
 }
 
-func pullWorker(ts *http.Transport) {
+func pullWorker(client *http.Client) {
 	db, err := sql.Open("mysql", config.MysqlDsn)
 	defer db.Close()
 	if err = db.Ping(); err != nil {
@@ -45,11 +47,6 @@ func pullWorker(ts *http.Transport) {
 		return
 	}
 	db.Exec("set session wait_timeout=600")
-
-	client := &http.Client{
-		Transport: ts,
-		Timeout:   time.Duration(config.PullRequestTimeout) * time.Second,
-	}
 
 	for {
 		select {
@@ -61,8 +58,9 @@ func pullWorker(ts *http.Transport) {
 				updateState(db, endPoint.Host, endPoint.Uri, nil, err)
 				continue
 			}
-			defer rsp.Body.Close()
+
 			body, err := ioutil.ReadAll(rsp.Body)
+			rsp.Body.Close()
 			if err != nil {
 				lg.Error("read rsp body error, ", url, err.Error())
 				updateState(db, endPoint.Host, endPoint.Uri, nil, errors.New(err.Error()))
@@ -73,6 +71,7 @@ func pullWorker(ts *http.Transport) {
 				lg.Debug("get rsp code OK, ", endPoint.Host, endPoint.Uri, code)
 				updateState(db, endPoint.Host, endPoint.Uri, body, nil)
 			}
+			
 			// other case
 		}
 	}
@@ -461,10 +460,10 @@ func addTask() error {
 	query := `select host_ip from t_keymetric_host 
 				where lastupdate<from_unixtime(unix_timestamp(now())-inter_seconds+1)`
 	rows, err := db.Query(query)
+	defer rows.Close()
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var ip string
 		if err := rows.Scan(&ip); err != nil {
@@ -477,10 +476,10 @@ func addTask() error {
 	query = `select host_ip, port from t_keymetric_mysql
 				where lastupdate<from_unixtime(unix_timestamp(now())-inter_seconds+1)`
 	rows, err = db.Query(query)
+	defer rows.Close()
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var ip string
 		var port []uint8
@@ -507,11 +506,19 @@ func main() {
 		MaxIdleConnsPerHost: config.MaxIdleConnsPerHost,
 	}
 
-	for i := 0; i < config.MaxPullerWorker; i = i + 1 {
-		go func(ts *http.Transport) {
-			pullWorker(ts)
-		}(ts)
+	client := &http.Client{
+		Transport: ts,
+		Timeout:   time.Duration(config.PullRequestTimeout) * time.Second,
 	}
+	for i := 0; i < config.MaxPullerWorker; i = i + 1 {
+		go func(client *http.Client) {
+			pullWorker(client)
+		}(client)
+	}
+
+	go func() {
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
+	}()
 
 	for {
 		if err := addTask(); err != nil {
