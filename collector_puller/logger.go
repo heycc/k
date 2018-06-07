@@ -9,8 +9,8 @@ type Logger struct {
 	lg          *log.Logger
 	logfile     string
 	defaultFlag int
-	logLevelMap	map[string]int
-	logLevel 	string
+	logLevelMap map[string]int
+	logLevel    string
 }
 
 func (l *Logger) Init(f string, level string) {
